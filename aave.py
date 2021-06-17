@@ -3,13 +3,11 @@ import os
 from web3 import Web3
 from eth_abi import encode_single, encode_abi
 
-###############################################################################
 # utils
 gas_price=17
 eth_price=2332
 
 def display(accounts):
-
     print('account address                           ', '|', 
             'reserve underlying asset','|', 
             'health factor')
@@ -24,48 +22,50 @@ def display(accounts):
 def estimateTxFee(gas):
     print(((gas * gas_price)/1e9) * eth_price)
 
-###############################################################################
 # ether opts
 web3 = Web3(Web3.HTTPProvider('https://mainnet.infura.io/v3/' + os.environ['INFURA_API_KEY']))
 key = os.environ['ETHEREUM_PRIVATE_KEY']
 me = os.environ['ETHEREUM_ADDRESS']
 bob = os.environ['BOB_ETHEREUM_ADDRESS']
 
-###############################################################################
-# tokens
 WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
 DAI = os.environ['DAI_ADDR']
 USDT = '0xdAC17F958D2ee523a2206206994597C13D831ec7'
 LINK = '0x514910771AF9Ca656af840dff83E8264EcF986CA'
 
-###############################################################################
-# setup dai
-dss = json.load(open('/home/' + os.environ['USER'] + '/dev/dss/out/dapp.sol.json', 'r'))
-daiAbi = dss['contracts']['src/dai.sol:Dai']['abi']
-dai = web3.eth.contract(abi=daiAbi, address=os.environ['DAI_ADDR'])
-daiAmountInWei = web3.toWei("1000", "ether")
+def Dai():
+    dss = json.load(open('/home/' + os.environ['USER'] + '/dev/dss/out/dapp.sol.json', 'r'))
+    daiAbi = dss['contracts']['src/dai.sol:Dai']['abi']
+    dai = web3.eth.contract(abi=daiAbi, address=os.environ['DAI_ADDR'])
+    return dai
 
-###############################################################################
+dai = Dai()
+
 # aave options
-AAVE_PATH = '/home/' + os.environ['USER'] + '/dev/aave-v2/artifacts/contracts/interfaces/'
-lpool_provider_addr = '0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5'
+def aave_abi(name):
+    AAVE_PATH = '/home/' + os.environ['USER'] + '/dev/aave-v2/artifacts/contracts/interfaces'
+    return json.load(open(f"{AAVE_PATH}/{name}.sol/{name}.json"))["abi"]
 
-lpool_provider_abi = json.load(open(AAVE_PATH + 'ILendingPoolAddressesProvider.sol/ILendingPoolAddressesProvider.json'))['abi']
-lpool_abi = json.load(open(AAVE_PATH + '/ILendingPool.sol/ILendingPool.json'))['abi']
+def aave():
+    lpool_provider_addr = '0xB53C1a33016B2DC2fF3653530bfF1848a515c8c5'
+    lpool_provider_abi = aave_abi('ILendingPoolAddressesProvider') 
+    lpool_abi = aave_abi('ILendingPool')
 
-lpool_provider = web3.eth.contract(abi=lpool_provider_abi, address=lpool_provider_addr)
-lpool_addr = lpool_provider.functions.getLendingPool().call()
-lpool = web3.eth.contract(abi=lpool_abi, address=lpool_addr)
+    lpool_provider = web3.eth.contract(abi=aave_abi('ILendingPoolAddressesProvider'), address=lpool_provider_addr)
+    lpool_addr = lpool_provider.functions.getLendingPool().call()
+    lpool = web3.eth.contract(abi=aave_abi('ILendingPool'), address=lpool_addr)
+
+    return (lpool, lpool_provider, lpool_addr)
+
+lpool, lpool_provider, lpool_addr = aave()
 
 accounts = json.load(open('liquidations.json', 'r'))['users']
 low_health = [account for account in accounts 
-                if float(account['user']['healthFactor']) < 1.0
-                and float(account['totalBorrowsUSD']) > 100.0]
+                if float(account['user']['healthFactor']) > 0.5
+                and float(account['totalBorrowsUSD']) > 500.0]
 
+display(low_health)
 
-display(accounts)
-
-###############################################################################
 # approve lending pool core address with dai contract
 allowance = dai.functions.allowance(me, lpool_addr).call()
 if allowance <= 0:
@@ -82,7 +82,6 @@ if allowance <= 0:
     web3.eth.sendRawTransaction(s_approval.rawTransaction)
 
 
-###############################################################################
 # liquidate
 #lpool.functions.liquidationCall(
 #    WETH,               # collateral
